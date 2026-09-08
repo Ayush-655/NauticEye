@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OceanGuard — Satellite Oil-Spill Attribution</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0A121B; --bg-2:#0C1720; --panel:#101E2A; --panel-2:#0D1922;
+    --border:#1D303E; --border-soft:#152430;
+    --text:#DCE7EE; --text-dim:#7E93A3; --text-faint:#4C6072;
+    --accent:#35D6C4; --accent-dim:rgba(53,214,196,.14);
+    --danger:#FF6B4A; --danger-dim:rgba(255,107,74,.16);
+    --warn:#F5B942; --warn-dim:rgba(245,185,66,.16);
+    --ok:#5FCB8E; --ok-dim:rgba(95,203,142,.16);
+    --violet:#9C8CFF;
+    --radius-sm:6px; --radius-md:10px; --radius-lg:16px;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:'Space Grotesk',system-ui,sans-serif;
+    overflow:hidden;
+  }
+  .mono{ font-family:'IBM Plex Mono', ui-monospace, monospace; }
+  ::-webkit-scrollbar{ width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb{ background:#1E3242; border-radius:8px; }
+  ::-webkit-scrollbar-track{ background:transparent; }
+
+  /* ---------- layout shell ---------- */
+  .app{ display:flex; flex-direction:column; height:100vh; }
+
+  .topbar{
+    display:flex; align-items:center; gap:18px;
+    padding:0 18px; height:58px; flex:0 0 auto;
+    background:linear-gradient(180deg,#0D1B26,#0B1620);
+    border-bottom:1px solid var(--border);
+    z-index:20;
+  }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .brand-mark{
+    width:32px; height:32px; border-radius:7px;
+    background:var(--accent); display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+  }
+  .brand-mark span{ font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:13px; color:#04211F; letter-spacing:-.5px; }
+  .brand-text{ line-height:1.1; }
+  .brand-text .n1{ font-weight:700; font-size:16.5px; letter-spacing:.2px; }
+  .brand-text .n2{ font-size:11px; color:var(--text-dim); }
+
+  .stat-strip{ display:flex; align-items:baseline; gap:16px; margin-left:10px; padding-left:16px; border-left:1px solid var(--border-soft); }
+  .stat-strip .item{ font-size:12px; color:var(--text-dim); white-space:nowrap; }
+  .stat-strip .item b{ font-family:'IBM Plex Mono',monospace; font-weight:600; color:var(--text); margin-right:4px; font-size:13px; }
+
+  .topbar-right{ margin-left:auto; display:flex; align-items:center; gap:10px; }
+  .pill{
+    padding:6px 13px; border-radius:20px; font-size:11.5px; font-weight:600;
+    letter-spacing:.3px; border:1px solid var(--border-soft);
+  }
+  .pill.dark{ background:#152534; color:var(--text-dim); }
+  .pill.clock{ background:var(--panel-2); color:var(--text-dim); display:flex; align-items:center; gap:7px; font-family:'IBM Plex Mono',monospace; }
+  .live-dot{ width:6px;height:6px;border-radius:50%;background:var(--accent); box-shadow:0 0 0 0 rgba(53,214,196,.6); animation:pulseDot 2.2s infinite; }
+  @keyframes pulseDot{ 0%{box-shadow:0 0 0 0 rgba(53,214,196,.5);} 70%{box-shadow:0 0 0 6px rgba(53,214,196,0);} 100%{box-shadow:0 0 0 0 rgba(53,214,196,0);} }
+
+  .body-row{ flex:1 1 auto; display:flex; min-height:0; }
+
+  /* ---------- sidebar ---------- */
+  .sidebar{
+    width:318px; flex:0 0 auto; border-right:1px solid var(--border);
+    background:var(--bg-2); display:flex; flex-direction:column; min-height:0;
+  }
+  .sidebar-head{ padding:16px 16px 10px; }
+  .sidebar-head h2{ margin:0 0 3px; font-size:13.5px; letter-spacing:.3px; }
+  .sidebar-head p{ margin:0; font-size:11.5px; color:var(--text-dim); line-height:1.5; }
+  .detect-list{ flex:1; overflow-y:auto; padding:6px 12px 16px; display:flex; flex-direction:column; gap:10px; }
+
+  .dcard{
+    border:1px solid var(--border-soft); border-left:3px solid var(--border-soft);
+    background:var(--panel); border-radius:var(--radius-md);
+    padding:10px; cursor:pointer; transition:border-color .15s, background .15s, transform .1s;
+    display:flex; gap:10px;
+  }
+  .dcard:hover{ background:#122333; }
+  .dcard.sel{ background:#132A34; }
+  .dcard[data-sev="high"]{ border-left-color:var(--danger); }
+  .dcard[data-sev="medium"]{ border-left-color:var(--warn); }
+  .dcard[data-sev="low"]{ border-left-color:var(--text-faint); }
+  .dcard canvas{ width:64px; height:48px; border-radius:5px; flex:0 0 auto; display:block; }
+  .dcard-info{ min-width:0; flex:1; }
+  .dcard-top{ display:flex; align-items:center; justify-content:space-between; gap:6px; }
+  .dcard-name{ font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .conf-badge{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; font-weight:600; padding:1px 6px; border-radius:5px; flex:0 0 auto; }
+  .conf-badge.high{ background:var(--danger-dim); color:var(--danger); }
+  .conf-badge.medium{ background:var(--warn-dim); color:var(--warn); }
+  .conf-badge.low{ background:rgba(124,147,163,.16); color:var(--text-dim); }
+  .dcard-meta{ margin-top:3px; font-size:10.5px; color:var(--text-dim); display:flex; gap:8px; flex-wrap:wrap;}
+  .status-tag{ font-size:9.5px; padding:1px 6px; border-radius:4px; letter-spacing:.3px; }
+  .status-tag.active{ background:var(--danger-dim); color:var(--danger); }
+  .status-tag.review{ background:var(--warn-dim); color:var(--warn); }
+  .status-tag.resolved{ background:var(--ok-dim); color:var(--ok); }
+
+  .sidebar-foot{ padding:12px 16px; border-top:1px solid var(--border-soft); }
+  .legend-row{ display:flex; align-items:center; gap:7px; font-size:11px; color:var(--text-dim); margin-bottom:6px; }
+  .legend-dot{ width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
+
+  /* ---------- map ---------- */
+  .map-wrap{ flex:1 1 auto; position:relative; min-width:0; }
+  #map{ position:absolute; inset:0; background:#0A121B; }
+  .leaflet-container{ font-family:'Space Grotesk',sans-serif; background:#0A121B; }
+  .leaflet-tile-pane{ filter:brightness(.55) saturate(1.15) contrast(1.08); }
+
+  .map-controls{
+    position:absolute; top:14px; right:14px; z-index:400;
+    background:rgba(13,25,34,.92); border:1px solid var(--border);
+    border-radius:var(--radius-md); padding:10px 12px; backdrop-filter:blur(6px);
+    display:flex; flex-direction:column; gap:8px; min-width:168px;
+  }
+  .map-controls .mc-title{ font-size:10px; letter-spacing:.5px; color:var(--text-dim); margin-bottom:2px; }
+  .toggle-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:12px; }
+  .coord-line{
+    font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-faint);
+    border-top:1px solid var(--border-soft); padding-top:8px; margin-top:2px;
+  }
+  .switch{ position:relative; width:30px; height:17px; flex:0 0 auto; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .switch .track{ position:absolute; inset:0; background:#243B4A; border-radius:20px; transition:.15s; cursor:pointer; }
+  .switch .track:before{ content:''; position:absolute; width:13px; height:13px; left:2px; top:2px; background:#9FB3C1; border-radius:50%; transition:.15s; }
+  .switch input:checked + .track{ background:var(--accent-dim); border:1px solid rgba(53,214,196,.4); }
+  .switch input:checked + .track:before{ transform:translateX(13px); background:var(--accent); }
+
+  .map-idle-note{
+    position:absolute; left:14px; bottom:70px; z-index:400;
+    background:rgba(13,25,34,.92); border:1px solid var(--border); border-radius:var(--radius-md);
+    padding:9px 12px; font-size:11px; color:var(--text-dim); max-width:280px; backdrop-filter:blur(6px);
+  }
+
+  .time-dock{
+    position:absolute; left:0; right:0; bottom:0; height:54px; z-index:450;
+    background:rgba(10,18,27,.94); border-top:1px solid var(--border); backdrop-filter:blur(6px);
+    display:flex; align-items:center; gap:14px; padding:0 18px;
+  }
+  .play-btn{
+    width:32px; height:32px; border-radius:50%; flex:0 0 auto;
+    border:1px solid var(--border-soft); background:var(--panel); color:var(--accent);
+    display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:12px;
+  }
+  .play-btn:hover{ background:var(--accent-dim); }
+  .time-slider-wrap{ flex:1; display:flex; flex-direction:column; gap:2px; }
+  .time-slider-wrap input[type=range]{ width:100%; accent-color:var(--accent); }
+  .time-label-row{ display:flex; justify-content:space-between; font-size:9.5px; color:var(--text-faint); font-family:'IBM Plex Mono',monospace; }
+  #timeNowLabel{ color:var(--accent); font-size:11px; }
+
+  .dcard.pending{ opacity:.4; pointer-events:none; }
+
+  .tour-bar{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:9px 18px; border-bottom:1px solid var(--border-soft); background:var(--panel-2);
+  }
+  .tnav-btn{
+    background:none; border:1px solid var(--border-soft); color:var(--text-dim);
+    font-size:11px; padding:5px 10px; border-radius:7px; cursor:pointer; font-family:'Space Grotesk',sans-serif;
+  }
+  .tnav-btn:hover{ color:var(--text); border-color:var(--accent); }
+  .tour-pos{ font-family:'IBM Plex Mono',monospace; font-size:10px; color:var(--text-faint); }
+
+  .sec-title-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+  .dl-btn{
+    font-size:10.5px; color:var(--accent); background:var(--accent-dim);
+    border:1px solid rgba(53,214,196,.3); padding:4px 9px; border-radius:6px;
+    cursor:pointer; font-family:'Space Grotesk',sans-serif; white-space:nowrap;
+  }
+  .dl-btn:hover{ background:rgba(53,214,196,.24); }
+
+  .tour-start-btn{
+    display:inline-flex; align-items:center; gap:6px; margin-bottom:18px;
+    background:var(--accent-dim); color:var(--accent); border:1px solid rgba(53,214,196,.35);
+    font-size:12px; font-weight:600; padding:8px 14px; border-radius:8px; cursor:pointer;
+    font-family:'Space Grotesk',sans-serif;
+  }
+  .tour-start-btn:hover{ background:rgba(53,214,196,.24); }
+
+  .ship-tip{ font-family:'IBM Plex Mono',monospace; font-size:11px; line-height:1.5; }
+  .leaflet-control-scale-line{
+    background:rgba(13,25,34,.85); border:1px solid var(--border) !important; border-top:none !important;
+    color:var(--text-dim); font-family:'IBM Plex Mono',monospace; font-size:10px;
+  }
+  .leaflet-popup-content-wrapper{ background:#101E2A; color:var(--text); border-radius:8px; border:1px solid var(--border);}
+  .leaflet-popup-tip{ background:#101E2A; }
+  .leaflet-popup-content{ margin:9px 11px; }
+
+  /* ---------- analysis panel ---------- */
+  .panel{
+    width:392px; flex:0 0 auto; border-left:1px solid var(--border);
+    background:var(--bg-2); display:flex; flex-direction:column; min-height:0;
+  }
+  .panel-scroll{ flex:1; overflow-y:auto; }
+
+  .panel-idle{ padding:26px 22px; }
+  .panel-idle h3{ font-size:14px; margin:0 0 6px; }
+  .panel-idle p{ font-size:12px; color:var(--text-dim); line-height:1.6; margin:0 0 20px; }
+  .flow-step{ display:flex; gap:10px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border-soft); }
+  .flow-step:first-child{ border-top:none; }
+  .flow-dot{ width:22px; height:22px; border-radius:6px; background:var(--accent-dim); color:var(--accent);
+    display:flex; align-items:center; justify-content:center; font-size:11px; flex:0 0 auto; margin-top:1px;}
+  .flow-txt b{ display:block; font-size:12px; margin-bottom:1px; }
+  .flow-txt span{ font-size:11px; color:var(--text-dim); }
+
+  .panel-header{
+    padding:16px 18px 14px; border-bottom:1px solid var(--border-soft);
+    display:flex; align-items:flex-start; justify-content:space-between; gap:10px;
+  }
+  .panel-header h3{ margin:0 0 3px; font-size:14.5px; }
+  .panel-header .loc{ font-size:11px; color:var(--text-dim); font-family:'IBM Plex Mono',monospace;}
+  .close-btn{
+    width:26px; height:26px; border-radius:7px; border:1px solid var(--border-soft);
+    background:var(--panel); color:var(--text-dim); cursor:pointer; flex:0 0 auto;
+    font-size:14px; line-height:1;
+  }
+  .close-btn:hover{ color:var(--text); }
+
+  .sec{ padding:16px 18px; border-bottom:1px solid var(--border-soft); }
+  .sec-title{ font-size:12px; font-weight:600; color:var(--text); margin:0 0 10px; }
+
+  .sar-canvas-wrap{ position:relative; border-radius:9px; overflow:hidden; border:1px solid var(--border-soft); }
+  .sar-canvas-wrap canvas{ display:block; width:100%; height:auto; }
+
+  .meta-strip{ display:flex; gap:0; margin-top:12px; border:1px solid var(--border-soft); border-radius:8px; overflow:hidden; }
+  .meta-strip .cell{ flex:1; padding:8px 10px; border-left:1px solid var(--border-soft); }
+  .meta-strip .cell:first-child{ border-left:none; }
+  .meta-strip .cell b{ display:block; font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:13.5px; color:var(--text); }
+  .meta-strip .cell span{ font-size:9.5px; color:var(--text-faint); }
+
+  .desc-text{ font-size:11.5px; color:var(--text-dim); line-height:1.6; margin-top:10px; }
+
+  .resolved-box{
+    margin-top:12px; padding:10px 11px; border-radius:8px;
+    background:var(--ok-dim); border:1px solid rgba(95,203,142,.3); font-size:11.5px; color:var(--ok); line-height:1.5;
+  }
+
+  .vrow{
+    border:1px solid var(--border-soft); border-radius:9px; background:var(--panel);
+    padding:10px 11px; margin-bottom:8px; cursor:pointer;
+  }
+  .vrow:last-child{ margin-bottom:0; }
+  .vrow-top{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .vrow-name{ font-size:12.5px; font-weight:600; }
+  .vrow-sub{ font-size:10px; color:var(--text-dim); font-family:'IBM Plex Mono',monospace; margin-top:1px;}
+  .score-badge{ font-family:'IBM Plex Mono',monospace; font-weight:700; font-size:13px; flex:0 0 auto; }
+  .bar-track{ height:5px; border-radius:4px; background:#1A2C3A; margin-top:8px; overflow:hidden; }
+  .bar-fill{ height:100%; border-radius:4px; }
+  .vrow-detail{ display:none; margin-top:10px; padding-top:10px; border-top:1px solid var(--border-soft); }
+  .vrow.open .vrow-detail{ display:block; }
+  .subscore{ display:flex; align-items:center; gap:8px; font-size:10.5px; color:var(--text-dim); margin-bottom:6px; }
+  .subscore .lbl{ width:88px; flex:0 0 auto; }
+  .subscore .bar-track{ flex:1; margin:0; }
+  .subscore .num{ width:30px; text-align:right; font-family:'IBM Plex Mono',monospace; color:var(--text); }
+  .vrow-actions{ display:flex; gap:8px; margin-top:10px; }
+  .btn{
+    flex:1; text-align:center; font-size:11px; font-weight:600; padding:7px 8px; border-radius:7px;
+    border:1px solid var(--border-soft); background:var(--panel-2); color:var(--text-dim); cursor:pointer;
+  }
+  .btn:hover{ color:var(--text); }
+  .btn.on{ background:var(--accent-dim); color:var(--accent); border-color:rgba(53,214,196,.35); }
+  .btn.flagged{ background:var(--danger-dim); color:var(--danger); border-color:rgba(255,107,74,.35); }
+
+  .vrow-more{ text-align:center; font-size:11px; color:var(--text-dim); padding:8px 0 2px; cursor:pointer; }
+  .vrow-more:hover{ color:var(--text); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <span>OG</span>
+      </div>
+      <div class="brand-text">
+        <div class="n1">OceanGuard</div>
+        <div class="n2">Satellite Oil-Spill &amp; Vessel Attribution</div>
+      </div>
+    </div>
+
+    <div class="topbar-stats" id="statChips"></div>
+
+    <div class="topbar-right">
+      <span class="pill clock"><span class="live-dot"></span><span id="clockText">—</span></span>
+      <span class="pill dark">TEAM RAW ONIONS</span>
+      <span class="pill dark">SIH 2026</span>
+    </div>
+  </div>
+
+  <div class="body-row">
+
+    <div class="sidebar">
+      <div class="sidebar-head">
+        <h2>Detections</h2>
+        <p>SAR passes over the Arabian Sea, west coast of India, flagged by the segmentation model.</p>
+      </div>
+      <div class="detect-list" id="detectList"></div>
+      <div class="sidebar-foot">
+        <div class="legend-row"><span class="legend-dot" style="background:var(--danger)"></span> High confidence spill</div>
+        <div class="legend-row"><span class="legend-dot" style="background:var(--warn)"></span> Medium / needs review</div>
+        <div class="legend-row"><span class="legend-dot" style="background:var(--text-faint)"></span> Resolved / low confidence</div>
+      </div>
+    </div>
+
+    <div class="map-wrap">
+      <div id="map"></div>
+
+      <div class="map-controls">
+        <div class="mc-title">Map layers</div>
+        <div class="toggle-row">Oil-spill footprints
+          <label class="switch"><input type="checkbox" id="toggleSpills" checked><span class="track"></span></label>
+        </div>
+        <div class="toggle-row">AIS vessels
+          <label class="switch"><input type="checkbox" id="toggleVessels" checked><span class="track"></span></label>
+        </div>
+        <div class="toggle-row">Vessel tracks (24–48h)
+          <label class="switch"><input type="checkbox" id="toggleTracks"><span class="track"></span></label>
+        </div>
+        <div class="coord-line" id="coordLine">— , —</div>
+      </div>
+
+      <div class="map-idle-note" id="mapNote">Click a detection on the left, or a spill marker on the map, to run vessel correlation.</div>
+
+      <div class="time-dock">
+        <div class="play-btn" id="playBtn">▶</div>
+        <div class="time-slider-wrap">
+          <input type="range" id="timeSlider" min="0" max="56" step="1" value="56">
+          <div class="time-label-row"><span>T-56h</span><span id="timeNowLabel" class="mono">NOW</span><span>Now</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-scroll" id="panelScroll"></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+/* =========================================================
+   DATA — synthetic but geographically grounded (Arabian Sea,
+   Mumbai High offshore field to Gulf of Khambhat, India)
+   ========================================================= */
+
+const NOW = Date.UTC(2026, 8, 9, 9, 0, 0); // 2026-09-09T09:00:00Z
+const T = (hAgo) => NOW - hAgo * 3600000;
+
+const SPILLS = [
+  {
+    id:'S1', name:'Mumbai High Slick', lat:19.52, lng:71.48,
+    detectedAt:T(2), confidence:94, area:12.4, severity:'high', status:'active',
+    satellite:'RISAT-2BR1 (simulated)',
+    desc:"Elongated slick immediately south-west of the Mumbai High offshore platform cluster. SAR backscatter and low-texture edges are consistent with a fresh crude discharge rather than a weathered natural film."
+  },
+  {
+    id:'S2', name:'Shipping Lane B Slick', lat:18.75, lng:70.20,
+    detectedAt:T(5), confidence:78, area:6.1, severity:'medium', status:'active',
+    satellite:'Sentinel-1 (simulated)',
+    desc:"Narrow, linear slick aligned with a tanker corridor into Mumbai Port — the shape suggests a discharge from a moving vessel rather than a static source."
+  },
+  {
+    id:'S3', name:'Khambhat Estuary Sheen', lat:20.85, lng:72.05,
+    detectedAt:T(9), confidence:61, area:2.3, severity:'low', status:'review',
+    satellite:'RISAT-2BR1 (simulated)',
+    desc:"Faint, patchy sheen near the Gulf of Khambhat mouth. Texture is also consistent with a natural biogenic seep or a tidal convergence line — flagged for analyst review rather than an automatic alert."
+  },
+  {
+    id:'S4', name:'Ratnagiri Coastal Slick', lat:17.05, lng:72.75,
+    detectedAt:T(48), confidence:88, area:8.7, severity:'high', status:'resolved',
+    satellite:'Sentinel-1 (simulated)',
+    desc:"Historic case, closed. Reconstructed AIS track matched MT Liberia Trader's course through the slick footprint to within 1.4 km at the time of detection.",
+    resolvedNote:"Vessel detained at Mumbai anchorage under Port State Control on 8 Sep 2026. Case closed; penalty proceedings underway."
+  },
+];
+
+// vessel track point: {t: ms, lat, lng, course(deg), speed(kn)}
+const VESSELS = [
+  { id:'V1', name:'MT Konkan Pride', mmsi:'419234561', flag:'India', type:'Crude Oil Tanker',
+    track:[
+      {t:T(30), lat:18.93, lng:72.88, course:300, speed:12},
+      {t:T(18), lat:19.05, lng:72.40, course:290, speed:12},
+      {t:T(9),  lat:19.28, lng:71.85, course:285, speed:11},
+      {t:T(2),  lat:19.50, lng:71.50, course:270, speed:10},
+      {t:T(0),  lat:19.62, lng:71.30, course:265, speed:13},
+    ]},
+  { id:'V2', name:'MT Arabian Voyager', mmsi:'352981004', flag:'Panama', type:'Crude Oil Tanker',
+    track:[
+      {t:T(30), lat:17.85, lng:68.85, course:35, speed:14},
+      {t:T(20), lat:18.20, lng:69.35, course:36, speed:14},
+      {t:T(13), lat:18.55, lng:69.85, course:38, speed:14},
+      {t:T(5),  lat:18.75, lng:70.20, course:40, speed:15},
+      {t:T(0),  lat:19.05, lng:70.75, course:42, speed:15},
+    ]},
+  { id:'V3', name:'MT Liberia Trader', mmsi:'636019283', flag:'Liberia', type:'Product Tanker', flagged:true,
+    track:[
+      {t:T(54), lat:16.80, lng:73.10, course:320, speed:13},
+      {t:T(50), lat:16.95, lng:72.90, course:315, speed:13},
+      {t:T(48), lat:17.05, lng:72.75, course:310, speed:13},
+      {t:T(30), lat:17.60, lng:72.20, course:300, speed:14},
+      {t:T(0),  lat:18.92, lng:72.83, course:280, speed:0},
+    ]},
+  { id:'V4', name:'MV Saurashtra Star', mmsi:'419556789', flag:'India', type:'Chemical Tanker',
+    track:[
+      {t:T(24), lat:22.00, lng:68.95, course:200, speed:12},
+      {t:T(16), lat:21.20, lng:69.45, course:150, speed:12},
+      {t:T(8),  lat:20.65, lng:70.30, course:110, speed:11},
+      {t:T(2),  lat:20.55, lng:71.70, course:85,  speed:10},
+      {t:T(0),  lat:20.75, lng:72.15, course:55,  speed:9},
+    ]},
+  { id:'V5', name:'MT Kutch Explorer', mmsi:'419887001', flag:'India', type:'Crude Oil Tanker',
+    track:[
+      {t:T(30), lat:22.78, lng:69.62, course:0, speed:0},
+      {t:T(20), lat:22.79, lng:69.63, course:10, speed:0},
+      {t:T(10), lat:22.77, lng:69.61, course:0, speed:0},
+      {t:T(0),  lat:22.78, lng:69.62, course:0, speed:0},
+    ]},
+  { id:'V6', name:'MV Gulf Carrier', mmsi:'538002345', flag:'Marshall Islands', type:'Bulk Carrier',
+    track:[
+      {t:T(28), lat:17.40, lng:66.90, course:60, speed:13},
+      {t:T(18), lat:17.55, lng:67.35, course:60, speed:13},
+      {t:T(8),  lat:17.70, lng:67.85, course:58, speed:13},
+      {t:T(0),  lat:17.85, lng:68.25, course:55, speed:13},
+    ]},
+  { id:'V7', name:'FV Sagar Kanya', mmsi:'419011223', flag:'India', type:'Fishing Trawler',
+    track:[
+      {t:T(12), lat:18.85, lng:72.70, course:200, speed:6},
+      {t:T(8),  lat:18.70, lng:72.65, course:210, speed:6},
+      {t:T(4),  lat:18.55, lng:72.60, course:215, speed:6},
+      {t:T(0),  lat:18.45, lng:72.58, course:220, speed:5},
+    ]},
+  { id:'V8', name:'MV Konkan Runner', mmsi:'419334455', flag:'India', type:'Container Ship',
+    track:[
+      {t:T(20), lat:18.90, lng:72.75, course:170, speed:16},
+      {t:T(14), lat:18.30, lng:72.78, course:175, speed:16},
+      {t:T(7),  lat:17.70, lng:72.85, course:178, speed:15},
+      {t:T(0),  lat:17.10, lng:72.90, course:180, speed:15},
+    ]},
+  { id:'V9', name:'MT Singapore Glory', mmsi:'563021198', flag:'Singapore', type:'Product Tanker',
+    track:[
+      {t:T(26), lat:16.50, lng:70.50, course:320, speed:14},
+      {t:T(16), lat:17.10, lng:70.00, course:315, speed:14},
+      {t:T(6),  lat:17.70, lng:69.50, course:310, speed:14},
+      {t:T(0),  lat:18.10, lng:69.10, course:305, speed:14},
+    ]},
+  { id:'V10', name:'MV Kathiawar Express', mmsi:'419667788', flag:'India', type:'General Cargo',
+    track:[
+      {t:T(15), lat:21.60, lng:72.60, course:230, speed:12},
+      {t:T(10), lat:21.20, lng:72.40, course:225, speed:12},
+      {t:T(5),  lat:20.80, lng:72.30, course:220, speed:11},
+      {t:T(0),  lat:20.40, lng:72.10, course:215, speed:11},
+    ]},
+  { id:'V11', name:'MT Persian Horizon', mmsi:'422004455', flag:'Iran', type:'Crude Oil Tanker',
+    track:[
+      {t:T(30), lat:21.50, lng:66.00, course:140, speed:13},
+      {t:T(20), lat:20.60, lng:67.00, course:135, speed:13},
+      {t:T(10), lat:19.70, lng:68.00, course:130, speed:13},
+      {t:T(0),  lat:18.80, lng:69.00, course:125, speed:13},
+    ]},
+  { id:'V12', name:'MV Okha Pioneer', mmsi:'419778899', flag:'India', type:'Offshore Supply Vessel',
+    track:[
+      {t:T(16), lat:19.60, lng:71.55, course:200, speed:9},
+      {t:T(11), lat:19.55, lng:71.50, course:210, speed:8},
+      {t:T(6),  lat:19.48, lng:71.60, course:220, speed:9},
+      {t:T(0),  lat:19.35, lng:71.80, course:230, speed:9},
+    ]},
+  { id:'V13', name:'MT Daman Spirit', mmsi:'419992200', flag:'India', type:'Chemical Tanker',
+    track:[
+      {t:T(22), lat:19.80, lng:72.60, course:250, speed:12},
+      {t:T(14), lat:19.40, lng:72.00, course:255, speed:12},
+      {t:T(7),  lat:19.00, lng:71.40, course:260, speed:12},
+      {t:T(0),  lat:18.60, lng:70.80, course:265, speed:12},
+    ]},
+  { id:'V14', name:'MV Bombay Merchant', mmsi:'419445566', flag:'India', type:'General Cargo',
+    track:[
+      {t:T(10), lat:18.94, lng:72.84, course:0, speed:0},
+      {t:T(6),  lat:18.94, lng:72.84, course:0, speed:0},
+      {t:T(2),  lat:18.95, lng:72.85, course:0, speed:0},
+      {t:T(0),  lat:18.95, lng:72.85, course:90, speed:3},
+    ]},
+];
+
+const PLACE_LABELS = [
+  {name:'Mumbai', lat:18.96, lng:72.86},
+  {name:'Mumbai High Field', lat:19.52, lng:71.35},
+  {name:'Kandla', lat:23.03, lng:70.22},
+  {name:'Ratnagiri', lat:16.99, lng:73.30},
+  {name:'Gulf of Khambhat', lat:21.30, lng:72.35},
+];
+
+const flaggedState = {}; // key `${vesselId}__${spillId}` -> bool
+
+/* =========================================================
+   GEOMETRY / CORRELATION ENGINE
+   ========================================================= */
+const REF_LAT = 19.5;
+function toXY(lat, lng){ return { x: lng*111.32*Math.cos(REF_LAT*Math.PI/180), y: lat*111.32 }; }
+function haversineKm(lat1,lng1,lat2,lng2){
+  const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLng=(lng2-lng1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+function bearingDeg(lat1,lng1,lat2,lng2){
+  const r=Math.PI/180, φ1=lat1*r, φ2=lat2*r, Δλ=(lng2-lng1)*r;
+  const y=Math.sin(Δλ)*Math.cos(φ2);
+  const x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+  return (Math.atan2(y,x)*180/Math.PI + 360) % 360;
+}
+function angleDiff(a,b){ let d=Math.abs(a-b)%360; if(d>180) d=360-d; return d; }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+function closestApproach(vessel, spill){
+  let best = null;
+  for(let i=0;i<vessel.track.length-1;i++){
+    const A=vessel.track[i], B=vessel.track[i+1];
+    const pa=toXY(A.lat,A.lng), pb=toXY(B.lat,B.lng), ps=toXY(spill.lat,spill.lng);
+    const dx=pb.x-pa.x, dy=pb.y-pa.y;
+    const lenSq = dx*dx+dy*dy;
+    let t = lenSq===0 ? 0 : ((ps.x-pa.x)*dx+(ps.y-pa.y)*dy)/lenSq;
+    t = clamp(t,0,1);
+    const cx=pa.x+t*dx, cy=pa.y+t*dy;
+    const distKm = Math.hypot(ps.x-cx, ps.y-cy);
+    if(!best || distKm < best.distKm){
+      best = {
+        distKm, t,
+        atTime: A.t + t*(B.t-A.t),
+        lat: A.lat + t*(B.lat-A.lat),
+        lng: A.lng + t*(B.lng-A.lng),
+        course: A.course + t*(B.course-A.course),
+      };
+    }
+  }
+  return best;
+}
+
+function scoreVesselForSpill(vessel, spill){
+  const ca = closestApproach(vessel, spill);
+  const timeDiffH = Math.abs(spill.detectedAt - ca.atTime) / 3600000;
+  const proximity = clamp(100 - ca.distKm * (100/45), 0, 100);
+  const timeScore = clamp(100 - timeDiffH * (100/20), 0, 100);
+  const bearingToSpill = bearingDeg(ca.lat, ca.lng, spill.lat, spill.lng);
+  const headingDiff = angleDiff(ca.course, bearingToSpill);
+  const courseScore = clamp(100 - headingDiff * (100/100), 0, 100);
+  const overall = Math.round(proximity*0.45 + timeScore*0.35 + courseScore*0.20);
+  return { overall, proximity: Math.round(proximity), timeScore: Math.round(timeScore),
+    courseScore: Math.round(courseScore), distKm: ca.distKm, timeDiffH };
+}
+
+function rankVessels(spill){
+  return VESSELS.map(v => ({ vessel:v, score: scoreVesselForSpill(v, spill) }))
+    .sort((a,b) => b.score.overall - a.score.overall);
+}
+
+/* =========================================================
+   SAR SYNTHETIC IMAGE RENDERER
+   ========================================================= */
+function hashStr(s){ let h=0; for(let i=0;i<s.length;i++){ h=(h*31 + s.charCodeAt(i))|0; } return Math.abs(h)||1; }
+function prand(x){ const s=Math.sin(x)*43758.5453123; return s - Math.floor(s); }
+
+function drawSAR(canvas, spill){
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || canvas.width, cssH = canvas.clientHeight || canvas.height;
+  canvas.width = cssW*dpr; canvas.height = cssH*dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const w=cssW, h=cssH;
+  const seed = hashStr(spill.id);
+
+  const grad = ctx.createLinearGradient(0,0,w,h);
+  grad.addColorStop(0,'#243b46'); grad.addColorStop(1,'#0b151b');
+  ctx.fillStyle = grad; ctx.fillRect(0,0,w,h);
+
+  for(let i=0;i<1800;i++){
+    const x = prand(seed+i*1.371)*w, y = prand(seed+i*2.719)*h;
+    const b = prand(seed+i*3.147);
+    ctx.fillStyle = `rgba(${190+b*40},${200+b*35},${210+b*30},${0.03+b*0.07})`;
+    ctx.fillRect(x,y,1,1);
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.035)';
+  for(let y=0;y<h;y+=3){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+
+  ctx.save();
+  const n=16, cx=w*0.56, cy=h*0.52, baseR=Math.min(w,h)*0.30*(0.55+spill.confidence/100*0.6);
+  ctx.beginPath();
+  for(let i=0;i<=n;i++){
+    const ang=(i/n)*Math.PI*2;
+    const rr = baseR*(0.55+0.5*prand(seed+i*5.53));
+    const x = cx+Math.cos(ang)*rr*1.35, y = cy+Math.sin(ang)*rr*0.82;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+  const bg = ctx.createRadialGradient(cx,cy,2,cx,cy,baseR*1.6);
+  bg.addColorStop(0,'rgba(2,7,9,0.95)');
+  bg.addColorStop(0.7,'rgba(2,7,9,0.55)');
+  bg.addColorStop(1,'rgba(2,7,9,0)');
+  ctx.fillStyle = bg; ctx.fill();
+  ctx.restore();
+
+  // reference grid — reads as sensor raster, not decoration
+  ctx.strokeStyle = 'rgba(53,214,196,0.10)';
+  ctx.lineWidth = 1;
+  const cols = w>150 ? 6 : 3, rows = w>150 ? 4 : 2;
+  for(let i=1;i<cols;i++){ const x=Math.round((w/cols)*i)+0.5; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+  for(let j=1;j<rows;j++){ const y=Math.round((h/rows)*j)+0.5; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+
+  // AOI sensor-footprint frame
+  ctx.strokeStyle = 'rgba(220,231,238,0.3)';
+  ctx.setLineDash([4,3]);
+  ctx.strokeRect(3.5,3.5,w-7,h-7);
+  ctx.setLineDash([]);
+
+  // annotation callout — only on the large analysis view, avoids clutter on thumbnails
+  if(w > 150){
+    ctx.strokeStyle = '#35D6C4'; ctx.lineWidth = 1.3;
+    const csz = 7;
+    ctx.beginPath();
+    ctx.moveTo(cx-csz,cy); ctx.lineTo(cx+csz,cy);
+    ctx.moveTo(cx,cy-csz); ctx.lineTo(cx,cy+csz);
+    ctx.stroke();
+
+    const lx = Math.min(w-14, cx + baseR*1.4 + 30), ly = Math.max(24, cy - baseR*0.5 - 6);
+    ctx.strokeStyle = 'rgba(53,214,196,0.55)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx+5,cy-5); ctx.lineTo(lx-46, ly+3); ctx.stroke();
+
+    const label = `SPILL_MASK · ${spill.confidence}%`;
+    ctx.font = '600 10px "IBM Plex Mono", monospace';
+    const tw = ctx.measureText(label).width;
+    const bx = Math.min(w - tw - 14, lx - 46);
+    ctx.fillStyle = 'rgba(8,15,20,0.85)';
+    ctx.fillRect(bx-6, ly-9, tw+12, 16);
+    ctx.strokeStyle = 'rgba(53,214,196,0.45)';
+    ctx.strokeRect(bx-6, ly-9, tw+12, 16);
+    ctx.fillStyle = '#35D6C4'; ctx.textAlign = 'left';
+    ctx.fillText(label, bx, ly+2);
+  }
+
+  ctx.fillStyle = 'rgba(220,231,238,0.8)';
+  ctx.font = `${Math.max(8,w*0.028)}px "IBM Plex Mono", monospace`;
+  ctx.textAlign='left';
+  ctx.fillText('SAR · C-BAND · VV-POL', 7, 13);
+  ctx.fillText(spill.lat.toFixed(3)+'°N '+spill.lng.toFixed(3)+'°E', 7, h-7);
+  ctx.textAlign='right';
+  ctx.fillText('SIMULATED', w-7, h-7);
+}
+
+/* =========================================================
+   MAP SETUP
+   ========================================================= */
+const map = L.map('map', { zoomControl:false, attributionControl:true, minZoom:5, maxZoom:11 })
+  .setView([19.3, 71.2], 7);
+
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  attribution: 'Esri, Maxar, Earthstar Geographics',
+  maxZoom:19
+}).addTo(map);
+L.control.zoom({ position:'bottomright' }).addTo(map);
+L.control.scale({ position:'topleft', metric:true, imperial:false, maxWidth:120 }).addTo(map);
+
+const coordLine = document.getElementById('coordLine');
+map.on('mousemove', e=>{
+  coordLine.textContent = e.latlng.lat.toFixed(3) + '°N, ' + e.latlng.lng.toFixed(3) + '°E';
+});
+map.on('mouseout', ()=>{ coordLine.textContent = '— , —'; });
+
+PLACE_LABELS.forEach(p=>{
+  L.marker([p.lat,p.lng], {
+    icon: L.divIcon({ className:'', html:`<div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#7E93A3;white-space:nowrap;text-shadow:0 0 4px #0A121B,0 0 4px #0A121B;">· ${p.name}</div>`,
+      iconSize:[0,0], iconAnchor:[-4,4] })
+  }).addTo(map);
+});
+
+const sevColor = { high:'#FF6B4A', medium:'#F5B942', low:'#7E93A3' };
+const spillLayer = L.layerGroup().addTo(map);
+const spillLayers = {};
+
+function blobPoints(lat,lng,radiusKm,seed,n=12){
+  const pts=[];
+  for(let i=0;i<n;i++){
+    const ang=(i/n)*Math.PI*2;
+    const r = radiusKm*(0.55+0.5*prand(seed+i*7.13));
+    const dLat = (r/111.32)*Math.sin(ang);
+    const dLng = (r/(111.32*Math.cos(lat*Math.PI/180)))*Math.cos(ang)*1.3;
+    pts.push([lat+dLat, lng+dLng]);
+  }
+  return pts;
+}
+
+SPILLS.forEach(spill=>{
+  const color = sevColor[spill.severity];
+  const radiusKm = Math.sqrt(spill.area)*1.3 + 1.5;
+  const poly = L.polygon(blobPoints(spill.lat, spill.lng, radiusKm, hashStr(spill.id)), {
+    color, weight:1.4, fillColor:color, fillOpacity:0.28, opacity:0.85
+  });
+  const pulse = L.marker([spill.lat,spill.lng], {
+    icon: L.divIcon({ className:'', html:`<div style="width:14px;height:14px;border-radius:50%;background:${color};box-shadow:0 0 0 0 ${color}aa;animation:sarpulse 1.8s infinite;"></div>
+      <style>@keyframes sarpulse{0%{box-shadow:0 0 0 0 ${color}88;}70%{box-shadow:0 0 0 14px ${color}00;}100%{box-shadow:0 0 0 0 ${color}00;}}</style>`,
+      iconSize:[14,14], iconAnchor:[7,7] })
+  });
+  poly.on('click', ()=>selectSpill(spill.id));
+  pulse.on('click', ()=>selectSpill(spill.id));
+  poly.addTo(spillLayer); pulse.addTo(spillLayer);
+  spillLayers[spill.id] = { poly, pulse };
+});
+
+function shipIcon(course, color, size=15){
+  return L.divIcon({
+    className:'',
+    html:`<div style="width:${size}px;height:${size}px;transform:rotate(${course}deg);">
+      <svg viewBox="0 0 24 24" width="${size}" height="${size}"><polygon points="12,1 21,21 12,16.5 3,21" fill="${color}" stroke="#03181f" stroke-width="1.1"/></svg>
+    </div>`,
+    iconSize:[size,size], iconAnchor:[size/2,size/2]
+  });
+}
+
+const vesselLayer = L.layerGroup().addTo(map);
+const vesselMarkers = {};
+VESSELS.forEach(v=>{
+  const cur = v.track[v.track.length-1];
+  const marker = L.marker([cur.lat,cur.lng], { icon: shipIcon(cur.course, '#C9D8E2') });
+  marker.bindTooltip(
+    `<div class="ship-tip"><b>${v.name}</b><br/>MMSI ${v.mmsi} · ${v.flag}<br/>${v.type}<br/>${cur.speed} kn @ ${Math.round(cur.course)}°</div>`,
+    { direction:'top', offset:[0,-8] }
+  );
+  marker.addTo(vesselLayer);
+  vesselMarkers[v.id] = marker;
+});
+
+const trackLayer = L.layerGroup();
+VESSELS.forEach(v=>{
+  const latlngs = v.track.map(p=>[p.lat,p.lng]);
+  L.polyline(latlngs, { color:'#4C6072', weight:1.3, dashArray:'3,4', opacity:0.75 }).addTo(trackLayer);
+});
+
+const highlightLayer = L.layerGroup().addTo(map);
+const HL_COLORS = ['#35D6C4','#FF6B4A','#F5B942','#9C8CFF','#5FCB8E'];
+let hlIndex = 0;
+const activeHighlights = {}; // vesselId -> {layer, color}
+
+function toggleVesselTrack(vessel){
+  if(activeHighlights[vessel.id]){
+    highlightLayer.removeLayer(activeHighlights[vessel.id].layer);
+    delete activeHighlights[vessel.id];
+    return false;
+  }
+  const color = HL_COLORS[hlIndex % HL_COLORS.length]; hlIndex++;
+  const grp = L.layerGroup();
+  const latlngs = vessel.track.map(p=>[p.lat,p.lng]);
+  L.polyline(latlngs, { color, weight:2.6, opacity:0.9 }).addTo(grp);
+  vessel.track.forEach((p,i)=>{
+    L.circleMarker([p.lat,p.lng], { radius:i===vessel.track.length-1?5:3, color, fillColor:color, fillOpacity:1, weight:1 }).addTo(grp);
+  });
+  grp.addTo(highlightLayer);
+  activeHighlights[vessel.id] = { layer:grp, color };
+  return color;
+}
+
+document.getElementById('toggleSpills').addEventListener('change', e=>{
+  if(e.target.checked) spillLayer.addTo(map); else map.removeLayer(spillLayer);
+});
+document.getElementById('toggleVessels').addEventListener('change', e=>{
+  if(e.target.checked) vesselLayer.addTo(map); else map.removeLayer(vesselLayer);
+});
+document.getElementById('toggleTracks').addEventListener('change', e=>{
+  if(e.target.checked) trackLayer.addTo(map); else map.removeLayer(trackLayer);
+});
+
+/* =========================================================
+   TIME SIMULATION — scrub / replay vessel motion and
+   reveal detections as they would have appeared over time
+   ========================================================= */
+const MAX_H = 56;
+let currentSimMs = NOW;
+
+function interpAt(vessel, hoursAgo){
+  const simMs = NOW - hoursAgo*3600000;
+  const tr = vessel.track;
+  if(simMs <= tr[0].t) return { ...tr[0] };
+  if(simMs >= tr[tr.length-1].t) return { ...tr[tr.length-1] };
+  for(let i=0;i<tr.length-1;i++){
+    const A=tr[i], B=tr[i+1];
+    if(simMs>=A.t && simMs<=B.t){
+      const f = (simMs-A.t)/(B.t-A.t);
+      return {
+        lat: A.lat+f*(B.lat-A.lat), lng: A.lng+f*(B.lng-A.lng),
+        course: A.course+f*(B.course-A.course), speed: A.speed+f*(B.speed-A.speed),
+      };
+    }
+  }
+  return { ...tr[tr.length-1] };
+}
+
+const timeSlider = document.getElementById('timeSlider');
+const timeNowLabel = document.getElementById('timeNowLabel');
+const playBtn = document.getElementById('playBtn');
+
+function updateSimTime(sliderVal){
+  const hoursAgo = MAX_H - sliderVal;
+  currentSimMs = NOW - hoursAgo*3600000;
+
+  VESSELS.forEach(v=>{
+    const p = interpAt(v, hoursAgo);
+    const m = vesselMarkers[v.id];
+    m.setLatLng([p.lat, p.lng]);
+    m.setIcon(shipIcon(p.course, '#C9D8E2'));
+  });
+
+  SPILLS.forEach(s=>{
+    const detected = s.detectedAt <= currentSimMs;
+    const layers = spillLayers[s.id];
+    layers.poly.setStyle({ opacity: detected ? 0.85 : 0, fillOpacity: detected ? 0.28 : 0 });
+    const el = layers.pulse.getElement();
+    if(el) el.style.opacity = detected ? '1' : '0';
+  });
+
+  timeNowLabel.textContent = hoursAgo <= 0 ? 'NOW' : ('T-' + hoursAgo + 'h');
+  renderDetectList();
+}
+
+let playing = false, playTimer = null;
+playBtn.addEventListener('click', ()=>{
+  if(playing){
+    clearInterval(playTimer); playing=false; playBtn.textContent='▶';
+    return;
+  }
+  playing = true; playBtn.textContent='❚❚';
+  playTimer = setInterval(()=>{
+    let v = parseInt(timeSlider.value, 10) + 2;
+    if(v >= MAX_H){ v = MAX_H; }
+    timeSlider.value = v;
+    updateSimTime(v);
+    if(v >= MAX_H){ clearInterval(playTimer); playing=false; playBtn.textContent='▶'; }
+  }, 320);
+});
+timeSlider.addEventListener('input', e=> updateSimTime(parseInt(e.target.value,10)));
+
+/* =========================================================
+   SIDEBAR — detections list
+   ========================================================= */
+function fmtAgo(ms){
+  const h = Math.round((NOW - ms)/3600000);
+  if(h < 24) return h + 'h ago';
+  return Math.round(h/24) + 'd ago';
+}
+function sevClass(spill){ return spill.severity; }
+
+const detectList = document.getElementById('detectList');
+let selectedSpillId = null;
+
+function renderDetectList(){
+  detectList.innerHTML = '';
+  SPILLS.forEach(spill=>{
+    const pending = spill.detectedAt > currentSimMs;
+    const el = document.createElement('div');
+    el.className = 'dcard' + (spill.id===selectedSpillId ? ' sel':'') + (pending ? ' pending':'');
+    el.dataset.sev = spill.severity;
+    el.innerHTML = `
+      <canvas></canvas>
+      <div class="dcard-info">
+        <div class="dcard-top">
+          <div class="dcard-name">${spill.name}</div>
+          <div class="conf-badge ${spill.severity}">${spill.confidence}%</div>
+        </div>
+        <div class="dcard-meta">
+          <span class="status-tag ${spill.status}">${pending ? 'NOT YET DETECTED' : spill.status.toUpperCase()}</span>
+          <span>${fmtAgo(spill.detectedAt)}</span>
+          <span>${spill.area} km²</span>
+        </div>
+      </div>`;
+    if(!pending) el.addEventListener('click', ()=>selectSpill(spill.id));
+    detectList.appendChild(el);
+    drawSAR(el.querySelector('canvas'), spill);
+  });
+}
+
+/* =========================================================
+   STAT CHIPS
+   ========================================================= */
+function renderStatChips(){
+  const active = SPILLS.filter(s=>s.status==='active').length;
+  const avgConf = Math.round(SPILLS.reduce((a,s)=>a+s.confidence,0)/SPILLS.length);
+  const items = [
+    { v: SPILLS.length, l:'detections' },
+    { v: active, l:'active' },
+    { v: VESSELS.length, l:'vessels tracked' },
+    { v: avgConf+'%', l:'avg. confidence' },
+  ];
+  document.getElementById('statChips').innerHTML = `<div class="stat-strip">` + items.map(c=>
+    `<span class="item"><b>${c.v}</b>${c.l}</span>`).join('') + `</div>`;
+}
+
+function tickClock(){
+  const el = document.getElementById('clockText');
+  if(el) el.textContent = new Date().toISOString().substr(11,8) + ' UTC';
+}
+tickClock();
+setInterval(tickClock, 1000);
+
+/* =========================================================
+   PANEL — idle state + analysis state
+   ========================================================= */
+const panelScroll = document.getElementById('panelScroll');
+
+function renderIdlePanel(){
+  panelScroll.innerHTML = `
+    <div class="panel-idle">
+      <button class="tour-start-btn" id="startTourBtn">▶ Start guided tour</button>
+      <h3>How attribution works</h3>
+      <p>Select a detection to run the correlation engine: it reconstructs each vessel's track and scores how well it lines up with the spill in space and time.</p>
+      <div class="flow-step"><div class="flow-dot">1</div><div class="flow-txt"><b>SAR capture</b><span>Raw satellite pass over the AOI, calibrated and speckle-filtered.</span></div></div>
+      <div class="flow-step"><div class="flow-dot">2</div><div class="flow-txt"><b>AI segmentation</b><span>Model outputs a spill mask with a confidence score.</span></div></div>
+      <div class="flow-step"><div class="flow-dot">3</div><div class="flow-txt"><b>Geo-referencing</b><span>Mask converted to real-world lat/long using scene metadata.</span></div></div>
+      <div class="flow-step"><div class="flow-dot">4</div><div class="flow-txt"><b>AIS correlation</b><span>Vessel tracks scored on proximity, timing and heading.</span></div></div>
+      <div class="flow-step"><div class="flow-dot">5</div><div class="flow-txt"><b>Dashboard alert</b><span>Ranked candidates sent for analyst review.</span></div></div>
+    </div>`;
+  document.getElementById('startTourBtn').addEventListener('click', ()=> selectSpill(TOUR_ORDER[0]));
+}
+
+const TOUR_ORDER = ['S1','S2','S3','S4'];
+function tourStep(delta){
+  if(!selectedSpillId){ selectSpill(TOUR_ORDER[0]); return; }
+  let idx = TOUR_ORDER.indexOf(selectedSpillId);
+  idx = (idx + delta + TOUR_ORDER.length) % TOUR_ORDER.length;
+  selectSpill(TOUR_ORDER[idx]);
+}
+
+function downloadReport(spill, ranked){
+  const top = ranked.slice(0,5);
+  const rows = top.map((r,i)=>`
+    <tr>
+      <td>${i+1}</td><td>${r.vessel.name}</td><td>${r.vessel.mmsi}</td><td>${r.vessel.flag}</td>
+      <td>${r.score.overall}%</td><td>${r.score.distKm.toFixed(1)} km</td><td>${r.score.timeDiffH.toFixed(1)} h</td>
+    </tr>`).join('');
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>OceanGuard Report — ${spill.name}</title>
+  <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#fff;color:#1a1a1a;padding:32px;max-width:760px;margin:auto;}
+    h1{font-size:20px;margin-bottom:2px;} .sub{color:#666;font-size:12px;margin-bottom:20px;}
+    table{width:100%;border-collapse:collapse;margin-top:14px;font-size:12.5px;}
+    th,td{border:1px solid #ddd;padding:6px 8px;text-align:left;}
+    th{background:#f0f0f0;} .tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;}
+    .conf{background:#ffe4dc;color:#c1401f;}
+    .meta{font-size:12.5px;line-height:1.7;margin-top:10px;}
+    footer{margin-top:26px;font-size:10.5px;color:#999;border-top:1px solid #eee;padding-top:10px;}
+  </style></head><body>
+  <h1>OceanGuard — Attribution Report</h1>
+  <div class="sub">Generated ${new Date().toISOString()} · Team Raw Onions · SIH 2026</div>
+  <h2>${spill.name}</h2>
+  <div class="meta">
+    <b>Location:</b> ${spill.lat.toFixed(3)}°N, ${spill.lng.toFixed(3)}°E<br/>
+    <b>Detected:</b> ${new Date(spill.detectedAt).toUTCString()}<br/>
+    <b>AI confidence:</b> <span class="tag conf">${spill.confidence}%</span> &nbsp; <b>Estimated area:</b> ${spill.area} km²<br/>
+    <b>Satellite pass:</b> ${spill.satellite}<br/><br/>
+    ${spill.desc}
+    ${spill.resolvedNote ? '<br/><br/><b>Resolution:</b> '+spill.resolvedNote : ''}
+  </div>
+  <h3>Top correlated vessels</h3>
+  <table>
+    <tr><th>#</th><th>Vessel</th><th>MMSI</th><th>Flag</th><th>Score</th><th>Closest approach</th><th>Time offset</th></tr>
+    ${rows}
+  </table>
+  <footer>Generated by the OceanGuard prototype for Smart India Hackathon 2026. All vessel and detection data in this report is simulated for demonstration purposes.</footer>
+  </body></html>`;
+  const blob = new Blob([html], {type:'text/html'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `OceanGuard_Report_${spill.id}.html`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function scoreColor(score){
+  if(score>=70) return 'var(--danger)';
+  if(score>=40) return 'var(--warn)';
+  return 'var(--text-dim)';
+}
+
+let expandedVesselId = null;
+let showAllVessels = false;
+
+function renderAnalysisPanel(spill){
+  const ranked = rankVessels(spill);
+  showAllVessels = false;
+  const topN = 5;
+
+  panelScroll.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h3>${spill.name}</h3>
+        <div class="loc">${spill.lat.toFixed(3)}°N, ${spill.lng.toFixed(3)}°E</div>
+      </div>
+      <button class="close-btn" id="closePanel">✕</button>
+    </div>
+
+    <div class="tour-bar">
+      <div class="tnav-btn" id="tourPrev">‹ Prev</div>
+      <div class="tour-pos">CASE ${TOUR_ORDER.indexOf(spill.id)+1} / ${TOUR_ORDER.length}</div>
+      <div class="tnav-btn" id="tourNext">Next case ›</div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">SAR capture</div>
+      <div class="sar-canvas-wrap"><canvas id="sarBig"></canvas></div>
+      <div class="meta-strip">
+        <div class="cell"><b>${spill.confidence}%</b><span>AI confidence</span></div>
+        <div class="cell"><b>${spill.area} km²</b><span>estimated area</span></div>
+        <div class="cell"><b>${fmtAgo(spill.detectedAt)}</b><span>detected</span></div>
+      </div>
+      <div class="desc-text">${spill.desc}</div>
+      ${spill.resolvedNote ? `<div class="resolved-box">✓ ${spill.resolvedNote}</div>` : ''}
+      <div class="desc-text" style="margin-top:8px;color:var(--text-faint)">Satellite pass: ${spill.satellite}</div>
+    </div>
+
+    <div class="sec" style="border-bottom:none;">
+      <div class="sec-title-row">
+        <div class="sec-title" style="margin:0;">Correlated vessels, ranked</div>
+        <div class="dl-btn" id="downloadReport">Export report</div>
+      </div>
+      <div id="vlist"></div>
+      <div class="vrow-more" id="showMoreBtn"></div>
+    </div>
+  `;
+
+  drawSAR(document.getElementById('sarBig'), spill);
+  document.getElementById('closePanel').addEventListener('click', deselectSpill);
+  document.getElementById('tourPrev').addEventListener('click', ()=>tourStep(-1));
+  document.getElementById('tourNext').addEventListener('click', ()=>tourStep(1));
+  document.getElementById('downloadReport').addEventListener('click', ()=>downloadReport(spill, ranked));
+
+  function renderVList(){
+    const list = document.getElementById('vlist');
+    const shown = showAllVessels ? ranked : ranked.slice(0, topN);
+    list.innerHTML = shown.map(r=>{
+      const v = r.vessel, s = r.score;
+      const key = v.id+'__'+spill.id;
+      const isFlagged = !!flaggedState[key] || v.flagged;
+      const isTrackOn = !!activeHighlights[v.id];
+      const open = expandedVesselId === v.id;
+      return `
+      <div class="vrow ${open?'open':''}" data-vid="${v.id}">
+        <div class="vrow-top">
+          <div>
+            <div class="vrow-name">${v.name}</div>
+            <div class="vrow-sub">MMSI ${v.mmsi} · ${v.flag} · ${v.type}</div>
+          </div>
+          <div class="score-badge" style="color:${scoreColor(s.overall)}">${s.overall}%</div>
+        </div>
+        <div class="bar-track"><div class="bar-fill" style="width:${s.overall}%;background:${scoreColor(s.overall)}"></div></div>
+        <div class="vrow-detail">
+          <div class="subscore"><span class="lbl">Proximity</span><div class="bar-track"><div class="bar-fill" style="width:${s.proximity}%;background:var(--accent)"></div></div><span class="num">${s.proximity}</span></div>
+          <div class="subscore"><span class="lbl">Time match</span><div class="bar-track"><div class="bar-fill" style="width:${s.timeScore}%;background:var(--accent)"></div></div><span class="num">${s.timeScore}</span></div>
+          <div class="subscore"><span class="lbl">Heading match</span><div class="bar-track"><div class="bar-fill" style="width:${s.courseScore}%;background:var(--accent)"></div></div><span class="num">${s.courseScore}</span></div>
+          <div class="desc-text" style="margin-top:2px;">Closest approach ${s.distKm.toFixed(1)} km from spill, ${s.timeDiffH.toFixed(1)} h from detection time.</div>
+          <div class="vrow-actions">
+            <div class="btn ${isTrackOn?'on':''}" data-act="track" data-vid="${v.id}">${isTrackOn?'Hide track':'View track'}</div>
+            <div class="btn ${isFlagged?'flagged':''}" data-act="flag" data-vid="${v.id}" data-key="${key}">${isFlagged?'Flagged ✓':'Flag for investigation'}</div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    list.querySelectorAll('.vrow').forEach(row=>{
+      row.addEventListener('click', (ev)=>{
+        if(ev.target.closest('.vrow-actions')) return;
+        const vid = row.dataset.vid;
+        expandedVesselId = (expandedVesselId===vid) ? null : vid;
+        renderVList();
+      });
+    });
+    list.querySelectorAll('[data-act="track"]').forEach(btn=>{
+      btn.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const v = VESSELS.find(x=>x.id===btn.dataset.vid);
+        toggleVesselTrack(v);
+        renderVList();
+      });
+    });
+    list.querySelectorAll('[data-act="flag"]').forEach(btn=>{
+      btn.addEventListener('click', (ev)=>{
+        ev.stopPropagation();
+        const key = btn.dataset.key;
+        flaggedState[key] = !flaggedState[key];
+        renderVList();
+      });
+    });
+
+    const moreBtn = document.getElementById('showMoreBtn');
+    const remaining = ranked.length - topN;
+    if(!showAllVessels && remaining > 0){
+      moreBtn.style.display='block';
+      moreBtn.textContent = `Show ${remaining} more vessels in area`;
+      moreBtn.onclick = ()=>{ showAllVessels = true; renderVList(); };
+    } else {
+      moreBtn.style.display='none';
+    }
+  }
+  renderVList();
+}
+
+/* =========================================================
+   SELECTION FLOW
+   ========================================================= */
+function selectSpill(id){
+  const spill = SPILLS.find(s=>s.id===id);
+  if(spill.detectedAt > currentSimMs) return;
+  selectedSpillId = id;
+  renderDetectList();
+  renderAnalysisPanel(spill);
+  map.flyTo([spill.lat, spill.lng], 8, { duration:0.6 });
+  document.getElementById('mapNote').style.display='none';
+}
+function deselectSpill(){
+  selectedSpillId = null;
+  renderDetectList();
+  renderIdlePanel();
+  document.getElementById('mapNote').style.display='block';
+}
+
+/* =========================================================
+   INIT
+   ========================================================= */
+renderStatChips();
+renderDetectList();
+renderIdlePanel();
+</script>
+</body>
+</html>
